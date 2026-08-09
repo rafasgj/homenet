@@ -25,15 +25,30 @@ python3 -m venv .venv
 .venv/bin/homenet wan
 ```
 
+## Configuration
+
+The router address is read from a configuration file. The following paths are searched in order:
+
+1. Path given by `--config` / `-c`
+2. `~/.config/homenet/config`
+3. `./.homenet`
+
+The file uses INI format with a `GATEWAY` variable:
+
+```ini
+GATEWAY = http://172.17.2.1
+```
+
 ## Usage
 
 ```
-homenet [--host URL] [-u USER] [-p PASSWORD] [--json] <command>
+homenet [-c CONFIG] [--host URL] [-u USER] [-p PASSWORD] [--json] <command>
 ```
 
 Global options:
 
-- `--host` -- Router URL (default: `http://172.17.2.1`)
+- `-c`, `--config` -- Path to a configuration file
+- `--host` -- Router URL (overrides `GATEWAY` from config)
 - `-u`, `--user` -- Login username (default: `admin`)
 - `-p`, `--password` -- Login password; prompted interactively if omitted
 - `--json` -- Output raw JSON instead of formatted tables

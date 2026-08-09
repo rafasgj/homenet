@@ -26,8 +26,10 @@
 """Access an Omada ER605 router and list WAN networks."""
 
 import argparse
+import configparser
 import getpass
 import json
+import os
 import sys
 
 import requests
@@ -35,8 +37,41 @@ import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-DEFAULT_HOST = "http://172.17.2.1"
 REFERER_PATH = "/webpages/login.html"
+CONFIG_SEARCH_PATHS = [
+    os.path.expanduser("~/.config/homenet/config"),
+    "./.homenet",
+]
+
+
+def _read_config_file(cfg, path):
+    """Read a config file, tolerating missing section headers."""
+    try:
+        cfg.read(path)
+    except configparser.MissingSectionHeaderError:
+        with open(path) as fh:
+            cfg.read_string("[DEFAULT]\n" + fh.read(), source=path)
+
+
+def load_config(config_path=None):
+    """Load configuration from file.
+
+    Search order: --config path, ~/.config/homenet/config, ./.homenet
+    """
+    cfg = configparser.ConfigParser()
+    if config_path:
+        if not os.path.isfile(config_path):
+            print(
+                f"Error: Config file not found: {config_path}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        _read_config_file(cfg, config_path)
+    else:
+        for path in CONFIG_SEARCH_PATHS:
+            if os.path.isfile(path):
+                _read_config_file(cfg, path)
+    return cfg
 
 
 def rsa_encrypt(plaintext, n_hex, e_hex):
@@ -544,9 +579,14 @@ def build_parser():
         description="Omada ER605 router CLI"
     )
     parser.add_argument(
+        "--config", "-c",
+        default=None,
+        help="Path to configuration file",
+    )
+    parser.add_argument(
         "--host",
-        default=DEFAULT_HOST,
-        help=f"Router URL (default: {DEFAULT_HOST})",
+        default=None,
+        help="Router URL (overrides GATEWAY from config)",
     )
     parser.add_argument("--user", "-u", default="admin", help="Username")
     parser.add_argument(
@@ -667,6 +707,17 @@ def main():
 
     if not hasattr(args, "func"):
         parser.print_help()
+        sys.exit(1)
+
+    cfg = load_config(args.config)
+    if not args.host:
+        args.host = cfg.get("DEFAULT", "GATEWAY", fallback=None)
+    if not args.host:
+        print(
+            "Error: No router host specified. "
+            "Use --host or set GATEWAY in a config file.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     password = args.password or getpass.getpass(
