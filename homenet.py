@@ -565,9 +565,10 @@ def build_parser():
     wan_parser = subparsers.add_parser(
         "wan", help="WAN operations"
     )
+    wan_parser.set_defaults(func=cmd_wan)
     wan_sub = wan_parser.add_subparsers(dest="wan_command")
 
-    # wan status (default when no subcommand)
+    # wan status
     wan_status_parser = wan_sub.add_parser(
         "status", help="List WAN interfaces"
     )
