@@ -6,6 +6,7 @@ A command-line tool for managing a TP-Link Omada ER605 router. It communicates d
 
 Requires Python 3.10 or later and:
 
+- [keyring](https://pypi.org/project/keyring/) -- system keyring access (macOS Keychain, Linux SecretService)
 - [requests](https://docs.python-requests.org/)
 - [urllib3](https://urllib3.readthedocs.io/)
 
@@ -38,6 +39,23 @@ The file uses INI format with a `GATEWAY` variable:
 ```ini
 GATEWAY = http://172.17.2.1
 ```
+
+## Password
+
+The router password is resolved in this order:
+
+1. `--password` / `-p` command-line option
+2. System keyring (macOS Keychain, Linux SecretService / secret-tool)
+3. Interactive prompt
+
+Use the `password` command to manage the stored password:
+
+```
+homenet password set      # prompt and store password in keyring
+homenet password clear    # remove password from keyring
+```
+
+The keyring entry is stored under the service name `homenet` with the login username (default `admin`). A different user can be specified with `-u`.
 
 ## Usage
 

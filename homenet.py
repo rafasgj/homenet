@@ -2,6 +2,7 @@
 # /// script
 # requires-python = ">=3.10"
 # dependencies = [
+#     "keyring",
 #     "requests",
 #     "urllib3",
 # ]
@@ -32,6 +33,7 @@ import json
 import os
 import sys
 
+import keyring
 import requests
 import urllib3
 
@@ -571,6 +573,29 @@ def cmd_dhcp_unreserve(router, args):
     sys.exit(1)
 
 
+# -- password commands -----------------------------------------------
+
+KEYRING_SERVICE = "homenet"
+
+
+def cmd_password_set(router, args):
+    password = getpass.getpass(f"Password for {args.user}: ")
+    keyring.set_password(KEYRING_SERVICE, args.user, password)
+    print(f"Password stored in keyring for user '{args.user}'")
+
+
+def cmd_password_clear(router, args):
+    try:
+        keyring.delete_password(KEYRING_SERVICE, args.user)
+        print(f"Password removed from keyring for user '{args.user}'")
+    except keyring.errors.PasswordDeleteError:
+        print(
+            f"No password found in keyring for user '{args.user}'",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
 # -- CLI -------------------------------------------------------------
 
 
@@ -698,6 +723,29 @@ def build_parser():
     )
     unreserve_parser.set_defaults(func=cmd_dhcp_unreserve)
 
+    # password
+    password_parser = subparsers.add_parser(
+        "password", help="Manage stored router password"
+    )
+    password_sub = password_parser.add_subparsers(
+        dest="password_command"
+    )
+
+    # password set
+    pw_set_parser = password_sub.add_parser(
+        "set", help="Store the router password in the system keyring"
+    )
+    pw_set_parser.set_defaults(func=cmd_password_set, needs_login=False)
+
+    # password clear
+    pw_clear_parser = password_sub.add_parser(
+        "clear",
+        help="Remove the router password from the system keyring",
+    )
+    pw_clear_parser.set_defaults(
+        func=cmd_password_clear, needs_login=False
+    )
+
     return parser
 
 
@@ -708,6 +756,10 @@ def main():
     if not hasattr(args, "func"):
         parser.print_help()
         sys.exit(1)
+
+    if not getattr(args, "needs_login", True):
+        args.func(None, args)
+        return
 
     cfg = load_config(args.config)
     if not args.host:
@@ -720,9 +772,13 @@ def main():
         )
         sys.exit(1)
 
-    password = args.password or getpass.getpass(
-        f"Password for {args.user}@{args.host}: "
-    )
+    password = args.password
+    if not password:
+        password = keyring.get_password(KEYRING_SERVICE, args.user)
+    if not password:
+        password = getpass.getpass(
+            f"Password for {args.user}@{args.host}: "
+        )
 
     router = OmadaRouter(args.host)
     try:
