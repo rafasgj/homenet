@@ -40,13 +40,21 @@ Global options:
 
 ## Commands
 
-### wan
+### wan status
 
 ```
-homenet wan
+homenet wan status
 ```
 
 Lists all WAN interfaces on the router, showing their status, protocol, IP address, gateway, DNS servers, and MAC address.
+
+### wan test
+
+```
+homenet wan test [--target HOST]
+```
+
+Tests connectivity on each WAN port by pinging a remote host through the router. By default it pings `8.8.8.8` and falls back to `1.1.1.1` if the first fails. Use `--target` to specify a custom IP address or hostname. Shows progress during the test and prints a pass/fail summary for each interface.
 
 ### dhcp assigned
 

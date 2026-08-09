@@ -143,6 +143,35 @@ class OmadaRouter:
                 pass
             self.stok = ""
 
+    def _post_diag(self, payload):
+        url = self._url("/admin/diagnostic?form=diag")
+        resp = self.session.post(
+            url, data={"data": json.dumps(payload)}, timeout=30
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def ping(self, target, iface, count=3):
+        import time
+
+        params = {
+            "type": "0",
+            "ipaddr": target,
+            "iface": iface,
+            "count": str(count),
+            "pktsize": "64",
+        }
+        self._post_diag({"method": "start", "params": params})
+        for _ in range(count + 10):
+            time.sleep(1)
+            data = self._post_diag(
+                {"method": "continue", "params": params}
+            )
+            result = data.get("result", {})
+            if str(result.get("finish")) == "1":
+                return result.get("my_result", "")
+        return None
+
     def get_interface_status(self):
         return self._post(
             "/admin/interface?form=status3", {"method": "get"}
@@ -297,6 +326,57 @@ def cmd_wan(router, args):
         return
     for wan in wan_list:
         _print_single_wan(wan)
+
+
+DEFAULT_PING_TARGETS = ["8.8.8.8", "1.1.1.1"]
+
+
+def cmd_wan_test(router, args):
+    targets = [args.target] if args.target else DEFAULT_PING_TARGETS
+    wan_list = router.get_wan_interfaces()
+    primary_wans = [
+        w for w in wan_list if not w.get("second_conn", False)
+    ]
+    if not primary_wans:
+        print("No WAN interfaces found.")
+        return
+
+    results = []
+    for wan in primary_wans:
+        name = wan.get("t_name", "?")
+        label = wan.get("t_label", "")
+        header = f"{name} ({label})" if label else name
+
+        passed = False
+        output = ""
+        for target in targets:
+            print(f"  {header}: pinging {target}...", end="", flush=True)
+            output = router.ping(target, name)
+            if output and "bytes=" in output:
+                passed = True
+                print(" OK")
+                break
+            print(" FAIL")
+
+        results.append({
+            "interface": name,
+            "label": label,
+            "target": target,
+            "passed": passed,
+            "output": output or "",
+        })
+
+    if args.output_json:
+        print(json.dumps(results, indent=2))
+        return
+
+    print()
+    for r in results:
+        label = r["label"]
+        name = r["interface"]
+        header = f"{name} ({label})" if label else name
+        status = "PASS" if r["passed"] else "FAIL"
+        print(f"  {header:<20s} {status:<6s} ({r['target']})")
 
 
 # -- dhcp assigned command -------------------------------------------
@@ -480,9 +560,26 @@ def build_parser():
 
     # wan
     wan_parser = subparsers.add_parser(
-        "wan", help="List WAN interfaces"
+        "wan", help="WAN operations"
     )
-    wan_parser.set_defaults(func=cmd_wan)
+    wan_sub = wan_parser.add_subparsers(dest="wan_command")
+
+    # wan status (default when no subcommand)
+    wan_status_parser = wan_sub.add_parser(
+        "status", help="List WAN interfaces"
+    )
+    wan_status_parser.set_defaults(func=cmd_wan)
+
+    # wan test
+    wan_test_parser = wan_sub.add_parser(
+        "test", help="Test WAN connectivity by pinging a remote host"
+    )
+    wan_test_parser.add_argument(
+        "--target", "-t",
+        default=None,
+        help="IP or hostname to ping (default: 8.8.8.8, fallback 1.1.1.1)",
+    )
+    wan_test_parser.set_defaults(func=cmd_wan_test)
 
     # dhcp
     dhcp_parser = subparsers.add_parser(
