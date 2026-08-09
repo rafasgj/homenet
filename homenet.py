@@ -317,7 +317,10 @@ def _print_single_wan(wan):
 
 
 def cmd_wan(router, args):
-    wan_list = router.get_wan_interfaces()
+    wan_list = [
+        w for w in router.get_wan_interfaces()
+        if w.get("t_proto") != "none"
+    ]
     if args.output_json:
         print(json.dumps(wan_list, indent=2))
         return
