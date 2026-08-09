@@ -1,0 +1,14 @@
+[project]
+name = "homenet"
+version = "0.1.0"
+description = "Access an Omada ER605 router and list WAN networks"
+license = "GPL-3.0-or-later"
+license-files = ["COPYING"]
+requires-python = ">=3.10"
+dependencies = [
+    "requests",
+    "urllib3",
+]
+
+[project.scripts]
+homenet = "homenet:main"
