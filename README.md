@@ -69,6 +69,8 @@ homenet certificate clear    # remove the stored certificate
 
 If no certificate is stored, HTTPS connections proceed without verification and a warning is printed. The certificate is saved to `~/.config/homenet/certs/`.
 
+**Note:** A firmware update will replace the router's certificate. Run `homenet certificate trust` again after updating the firmware to re-trust the new certificate.
+
 ## Usage
 
 ```
