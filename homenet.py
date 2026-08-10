@@ -29,8 +29,10 @@
 import argparse
 import configparser
 import getpass
+import ipaddress
 import json
 import os
+import re
 import sys
 
 import keyring
@@ -617,13 +619,35 @@ def cmd_dhcp_reserved(router, args):
 # -- dhcp reserve command --------------------------------------------
 
 
-def _normalize_mac(mac):
-    return mac.replace(":", "-").upper()
+_MAC_RE = re.compile(
+    r"^[0-9A-Fa-f]{2}([:-])[0-9A-Fa-f]{2}"
+    r"(\1[0-9A-Fa-f]{2}){4}$"
+)
+
+
+def _validate_ip(value):
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        print(f"Error: Invalid IP address: {value}", file=sys.stderr)
+        sys.exit(1)
+    return value
+
+
+def _validate_mac(value):
+    if not _MAC_RE.match(value):
+        print(
+            f"Error: Invalid MAC address: {value} "
+            f"(expected XX:XX:XX:XX:XX:XX or XX-XX-XX-XX-XX-XX)",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return value.replace(":", "-").upper()
 
 
 def cmd_dhcp_reserve(router, args):
-    ip = args.ip
-    mac = _normalize_mac(args.mac) if args.mac else None
+    ip = _validate_ip(args.ip)
+    mac = _validate_mac(args.mac) if args.mac else None
     name = args.name
     lan = args.lan
     enable = "on"
@@ -678,7 +702,7 @@ def cmd_dhcp_reserve(router, args):
 
 
 def cmd_dhcp_unreserve(router, args):
-    ip = args.ip
+    ip = _validate_ip(args.ip)
     reservations = router.get_dhcp_reservations()
     for i, r in enumerate(reservations):
         if r.get("ip") == ip:
