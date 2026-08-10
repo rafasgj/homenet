@@ -29,10 +29,12 @@
 import argparse
 import configparser
 import getpass
+import hashlib
 import ipaddress
 import json
 import os
 import re
+import ssl
 import sys
 
 import keyring
@@ -45,6 +47,12 @@ REFERER_PATH = "/webpages/login.html"
 CONFIG_SEARCH_PATHS = [
     os.path.expanduser("~/.config/homenet/config"),
 ]
+CERT_DIR = os.path.expanduser("~/.config/homenet/certs")
+
+
+def _cert_path_for_host(host):
+    host_hash = hashlib.sha256(host.encode()).hexdigest()[:16]
+    return os.path.join(CERT_DIR, f"{host_hash}.pem")
 
 
 def _read_config_file(cfg, path):
@@ -104,13 +112,42 @@ def rsa_encrypt(plaintext, n_hex, e_hex):
     return result.zfill(256)
 
 
+class _PinnedCertAdapter(requests.adapters.HTTPAdapter):
+    """HTTPS adapter that verifies a pinned CA cert without hostname check."""
+
+    def __init__(self, cert_file, **kwargs):
+        self._cert_file = cert_file
+        super().__init__(**kwargs)
+
+    def init_poolmanager(self, *args, **kwargs):
+        ctx = ssl.create_default_context(cafile=self._cert_file)
+        ctx.check_hostname = False
+        ctx.set_ciphers("DEFAULT:@SECLEVEL=0")
+        kwargs["ssl_context"] = ctx
+        kwargs["assert_hostname"] = False
+        super().init_poolmanager(*args, **kwargs)
+
+
 class OmadaRouter:
     def __init__(self, host):
         self.host = host.rstrip("/")
         self.session = requests.Session()
-        self.session.verify = False
         self.session.headers["Referer"] = f"{self.host}{REFERER_PATH}"
         self.stok = ""
+
+        cert_file = _cert_path_for_host(self.host)
+        if self.host.startswith("https://") and os.path.isfile(cert_file):
+            self.session.mount("https://", _PinnedCertAdapter(cert_file))
+            self.session.verify = True
+        else:
+            self.session.verify = False
+            if self.host.startswith("https://"):
+                print(
+                    "Warning: TLS certificate not verified. "
+                    "Run 'homenet certificate trust' to trust the "
+                    "router's certificate.",
+                    file=sys.stderr,
+                )
 
     def _url(self, path):
         return f"{self.host}/cgi-bin/luci/;stok={self.stok}{path}"
@@ -738,6 +775,67 @@ def cmd_password_clear(router, args):
         sys.exit(1)
 
 
+# -- certificate commands --------------------------------------------
+
+
+def _get_host_port(host_url):
+    from urllib.parse import urlparse
+
+    parsed = urlparse(host_url)
+    hostname = parsed.hostname or host_url
+    port = parsed.port or (443 if parsed.scheme == "https" else 443)
+    return hostname, port
+
+
+def cmd_certificate_trust(router, args):
+    if not args.host:
+        print("Error: No host specified.", file=sys.stderr)
+        sys.exit(1)
+
+    hostname, port = _get_host_port(args.host)
+
+    try:
+        pem = ssl.get_server_certificate((hostname, port))
+    except (OSError, ssl.SSLError) as exc:
+        print(
+            f"Error: Cannot retrieve certificate from "
+            f"{hostname}:{port}: {exc}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    cert_der = ssl.PEM_cert_to_DER_cert(pem)
+    fingerprint = hashlib.sha256(cert_der).hexdigest()
+    fingerprint_fmt = ":".join(
+        fingerprint[i : i + 2] for i in range(0, len(fingerprint), 2)
+    )
+
+    print(f"Certificate from {hostname}:{port}")
+    print(f"  SHA-256: {fingerprint_fmt}")
+
+    os.makedirs(CERT_DIR, exist_ok=True)
+    cert_file = _cert_path_for_host(args.host.rstrip("/"))
+    with open(cert_file, "w") as fh:
+        fh.write(pem)
+
+    print(f"  Saved to: {cert_file}")
+    print("The certificate will be used for TLS verification.")
+
+
+def cmd_certificate_clear(router, args):
+    if not args.host:
+        print("Error: No host specified.", file=sys.stderr)
+        sys.exit(1)
+
+    cert_file = _cert_path_for_host(args.host.rstrip("/"))
+    if os.path.isfile(cert_file):
+        os.remove(cert_file)
+        print("Stored certificate removed.")
+    else:
+        print("No stored certificate found.", file=sys.stderr)
+        sys.exit(1)
+
+
 # -- CLI -------------------------------------------------------------
 
 
@@ -894,6 +992,30 @@ def build_parser():
         func=cmd_password_clear, needs_login=False
     )
 
+    # certificate
+    cert_parser = subparsers.add_parser(
+        "certificate", help="Manage TLS certificate trust"
+    )
+    cert_sub = cert_parser.add_subparsers(dest="cert_command")
+
+    # certificate trust
+    cert_trust_parser = cert_sub.add_parser(
+        "trust",
+        help="Retrieve and trust the router's TLS certificate",
+    )
+    cert_trust_parser.set_defaults(
+        func=cmd_certificate_trust, needs_login=False
+    )
+
+    # certificate clear
+    cert_clear_parser = cert_sub.add_parser(
+        "clear",
+        help="Remove the stored TLS certificate",
+    )
+    cert_clear_parser.set_defaults(
+        func=cmd_certificate_clear, needs_login=False
+    )
+
     return parser
 
 
@@ -905,13 +1027,14 @@ def main():
         parser.print_help()
         sys.exit(1)
 
+    cfg = load_config(args.config)
+    if not args.host:
+        args.host = cfg.get("DEFAULT", "GATEWAY", fallback=None)
+
     if not getattr(args, "needs_login", True):
         args.func(None, args)
         return
 
-    cfg = load_config(args.config)
-    if not args.host:
-        args.host = cfg.get("DEFAULT", "GATEWAY", fallback=None)
     if not args.host:
         print(
             "Error: No router host specified. "

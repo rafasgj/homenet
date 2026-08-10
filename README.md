@@ -58,6 +58,17 @@ The keyring entry is stored under the service name `homenet` with the login user
 
 **Note:** The `--password` / `-p` option exposes the password in process listings and shell history. Prefer the keyring or interactive prompt for sensitive environments.
 
+## TLS Certificate
+
+When connecting over HTTPS, the router's self-signed certificate can be pinned locally so that connections are verified against it:
+
+```
+homenet certificate trust    # retrieve and store the router's certificate
+homenet certificate clear    # remove the stored certificate
+```
+
+If no certificate is stored, HTTPS connections proceed without verification and a warning is printed. The certificate is saved to `~/.config/homenet/certs/`.
+
 ## Usage
 
 ```
