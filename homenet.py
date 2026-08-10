@@ -176,7 +176,7 @@ class OmadaRouter:
                 self._post(
                     "/admin/system?form=logout", {"method": "set"}
                 )
-            except Exception:
+            except (requests.RequestException, RuntimeError):
                 pass
             self.stok = ""
 
