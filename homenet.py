@@ -297,6 +297,34 @@ class OmadaRouter:
             }
         return result
 
+    def set_wan_bandwidth(self, wan_id, uplink=None, downlink=None):
+        """Set bandwidth for a WAN port.
+
+        Only provided values (in Kbps) are changed; the other is
+        preserved from the current configuration.
+        """
+        cfg = self._post(
+            "/admin/interface_wan?form=wanconfig",
+            {"method": "get", "params": {"wan_id": wan_id}},
+        )
+        cfg_result = cfg.get("result", {})
+        params = dict(cfg_result)
+        params["wan_id"] = wan_id
+        if uplink is not None:
+            params["uplink"] = uplink
+        if downlink is not None:
+            params["downlink"] = downlink
+        data = self._post(
+            "/admin/interface_wan?form=wanconfig",
+            {"method": "set", "params": params},
+        )
+        if str(data.get("error_code", -1)) != "0":
+            raise RuntimeError(
+                f"Failed to set WAN bandwidth "
+                f"(error {data.get('error_code')})"
+            )
+        return data
+
     def get_interface_stats(self):
         data = self._post(
             "/admin/ifstat?form=list", {"method": "get"}
@@ -465,6 +493,88 @@ def cmd_wan(router, args):
         return
     for wan in wan_list:
         _print_single_wan(wan, bandwidth.get(wan.get("t_label")))
+
+
+def _parse_bandwidth(value):
+    """Parse a bandwidth string into Kbps.
+
+    Accepts plain integers (Kbps) or values with a suffix:
+    '500' = 500 Kbps, '100m' or '100M' = 100 Mbps = 100000 Kbps.
+    """
+    value = value.strip()
+    if value.lower().endswith("m"):
+        return int(float(value[:-1]) * 1000)
+    return int(value)
+
+
+def _resolve_wan(wan_list, mode_result, identifier):
+    """Resolve a WAN name to its wan_id number.
+
+    Matches against t_label (e.g. "WAN", "WAN/LAN1") or t_name
+    (e.g. "WAN1", "WAN2").
+    """
+    wan_names = mode_result.get("wan_names", [])
+
+    label_to_id = {}
+    for entry in wan_names:
+        label_to_id[entry.get("name", "")] = entry.get("index")
+
+    upper = identifier.upper()
+    for wan in wan_list:
+        if (
+            wan.get("t_label", "").upper() == upper
+            or wan.get("t_name", "").upper() == upper
+        ):
+            label = wan.get("t_label", "")
+            name = wan.get("t_name", "")
+            wan_id = label_to_id.get(label)
+            if wan_id is not None:
+                return wan_id, name, label
+    return None, None, None
+
+
+def cmd_wan_config(router, args):
+    downstream = args.downstream
+    upstream = args.upstream
+    if downstream is None and upstream is None:
+        print(
+            "Error: at least one of --downstream or --upstream is required",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    wan_list = router.get_wan_interfaces()
+    mode = router._post(
+        "/admin/interface_wan?form=wanmode", {"method": "get"}
+    )
+    mode_result = mode.get("result", {})
+
+    wan_id, name, label = _resolve_wan(
+        wan_list, mode_result, args.wan_name
+    )
+    if wan_id is None:
+        print(
+            f"Error: WAN interface '{args.wan_name}' not found",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    uplink_kbps = _parse_bandwidth(upstream) if upstream else None
+    downlink_kbps = _parse_bandwidth(downstream) if downstream else None
+
+    router.set_wan_bandwidth(wan_id, uplink=uplink_kbps, downlink=downlink_kbps)
+
+    header = f"{name} ({label})" if label else name
+    bandwidth = router.get_wan_bandwidth()
+    bw = bandwidth.get(label, {})
+    if args.output_json:
+        print(json.dumps({"interface": name, "label": label, "bandwidth": bw}, indent=2))
+        return
+    print(f"{header}: bandwidth updated")
+    if bw.get("uplink"):
+        print(f"  {'Upstream':<20s} {_format_kbps(bw['uplink'])}")
+    if bw.get("downlink"):
+        print(f"  {'Downstream':<20s} {_format_kbps(bw['downlink'])}")
 
 
 def _format_bytes(n):
@@ -895,6 +1005,26 @@ def build_parser():
         "stats", help="Show live traffic statistics for WAN interfaces"
     )
     wan_stats_parser.set_defaults(func=cmd_wan_stats)
+
+    # wan config
+    wan_config_parser = wan_sub.add_parser(
+        "config", help="Configure WAN bandwidth settings"
+    )
+    wan_config_parser.add_argument(
+        "wan_name",
+        help="WAN interface name (e.g. WAN, WAN/LAN1, WAN1)",
+    )
+    wan_config_parser.add_argument(
+        "--downstream",
+        default=None,
+        help="Downstream bandwidth in Kbps (suffix 'm' for Mbps, e.g. 100m)",
+    )
+    wan_config_parser.add_argument(
+        "--upstream",
+        default=None,
+        help="Upstream bandwidth in Kbps (suffix 'm' for Mbps, e.g. 50m)",
+    )
+    wan_config_parser.set_defaults(func=cmd_wan_config)
 
     # dhcp
     dhcp_parser = subparsers.add_parser(

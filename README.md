@@ -109,6 +109,16 @@ homenet wan test [--target HOST]
 
 Tests connectivity on each WAN port by pinging a remote host through the router. By default it pings `8.8.8.8` and falls back to `1.1.1.1` if the first fails. Use `--target` to specify a custom IP address or hostname. Shows progress during the test and prints a pass/fail summary for each interface.
 
+### wan config
+
+```
+homenet wan config WAN_NAME [--downstream VALUE] [--upstream VALUE]
+```
+
+Sets the downstream and/or upstream bandwidth for a WAN interface. The interface can be specified by its label (e.g. `WAN`, `WAN/LAN1`) or name (e.g. `WAN1`, `WAN2`). At least one of `--downstream` or `--upstream` must be provided; the other is preserved. Values are in Kbps by default; append `m` for Mbps (e.g. `100m`).
+
+**Note:** Changing the WAN interface configuration will reset all WAN statistics.
+
 ### dhcp assigned
 
 ```
