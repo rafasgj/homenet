@@ -1315,6 +1315,16 @@ def main():
     except RuntimeError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
+    except requests.exceptions.SSLError:
+        print(
+            f"Error: TLS certificate verification failed for {args.host}.\n"
+            "The router's certificate may have changed (e.g. after a "
+            "firmware update).\n"
+            "Run 'homenet certificate trust' to re-trust the "
+            "router's certificate.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     except requests.exceptions.ConnectionError:
         print(f"Error: Cannot connect to {args.host}", file=sys.stderr)
         sys.exit(1)
