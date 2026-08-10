@@ -96,10 +96,10 @@ Lists all WAN interfaces on the router, showing their status, protocol, IP addre
 ### wan stats
 
 ```
-homenet wan stats
+homenet wan stats [--clear]
 ```
 
-Shows live traffic statistics for each WAN interface, including configured bandwidth, current RX/TX rates, packets per second, and total bytes and packets transferred.
+Shows live traffic statistics for each WAN interface, including configured bandwidth, current RX/TX rates, packets per second, and total bytes and packets transferred. Use `--clear` to reset all interface statistics counters.
 
 ### wan test
 

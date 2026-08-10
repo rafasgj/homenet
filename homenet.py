@@ -323,6 +323,14 @@ class OmadaRouter:
             )
         return {s["zone"]: s for s in data.get("result", [])}
 
+    def clear_interface_stats(self):
+        data = self._post("/admin/ifstat?form=list", {"method": "clear"})
+        if str(data.get("error_code", -1)) != "0":
+            raise RuntimeError(
+                f"Failed to clear interface stats "
+                f"(error {data.get('error_code')})"
+            )
+
     def get_dhcp_clients(self):
         data = self._post("/admin/dhcps?form=client", {"method": "get"})
         if str(data.get("error_code", -1)) != "0":
@@ -580,6 +588,11 @@ def _format_bytes(n):
 
 
 def cmd_wan_stats(router, args):
+    if args.clear:
+        router.clear_interface_stats()
+        print("Statistics cleared.")
+        return
+
     wan_list = [
         w for w in router.get_wan_interfaces() if w.get("t_proto") != "none"
     ]
@@ -994,6 +1007,12 @@ def build_parser():
     # wan stats
     wan_stats_parser = wan_sub.add_parser(
         "stats", help="Show live traffic statistics for WAN interfaces"
+    )
+    wan_stats_parser.add_argument(
+        "--clear",
+        action="store_true",
+        default=False,
+        help="Clear all interface statistics",
     )
     wan_stats_parser.set_defaults(func=cmd_wan_stats)
 
