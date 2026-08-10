@@ -93,6 +93,14 @@ homenet wan status
 
 Lists all WAN interfaces on the router, showing their status, protocol, IP address, gateway, DNS servers, and MAC address.
 
+### wan stats
+
+```
+homenet wan stats
+```
+
+Shows live traffic statistics for each WAN interface, including configured bandwidth, current RX/TX rates, packets per second, and total bytes and packets transferred.
+
 ### wan test
 
 ```
@@ -139,6 +147,38 @@ homenet dhcp unreserve --ip IP
 ```
 
 Removes an existing DHCP reservation by IP address. Reports an error if no reservation exists for the given address.
+
+### password set
+
+```
+homenet password set
+```
+
+Prompts for the router password and stores it in the system keyring (macOS Keychain, Linux SecretService).
+
+### password clear
+
+```
+homenet password clear
+```
+
+Removes the stored password from the system keyring for the given user.
+
+### certificate trust
+
+```
+homenet certificate trust
+```
+
+Retrieves the router's TLS certificate and saves it locally for future connection verification. The certificate fingerprint is displayed for confirmation.
+
+### certificate clear
+
+```
+homenet certificate clear
+```
+
+Removes the locally stored TLS certificate for the router.
 
 ## License
 
