@@ -56,6 +56,8 @@ homenet password clear    # remove password from keyring
 
 The keyring entry is stored under the service name `homenet` with the login username (default `admin`). A different user can be specified with `-u`.
 
+**Note:** The `--password` / `-p` option exposes the password in process listings and shell history. Prefer the keyring or interactive prompt for sensitive environments.
+
 ## Usage
 
 ```
