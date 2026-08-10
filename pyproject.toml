@@ -13,6 +13,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "pre-commit",
     "ruff",
     "ty",
 ]
