@@ -38,7 +38,9 @@ import ssl
 import sys
 
 import keyring
+import keyring.errors
 import requests
+import requests.adapters
 import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -161,9 +163,7 @@ class OmadaRouter:
         return resp.json()
 
     def _get_auth_keys(self):
-        login_data = self._post(
-            "/login?form=login", {"method": "get"}
-        )
+        login_data = self._post("/login?form=login", {"method": "get"})
         result = login_data.get("result", {})
         password_keys = result.get("password", [])
         if len(password_keys) < 2:
@@ -197,23 +197,17 @@ class OmadaRouter:
                 "701": "Too many login attempts, try again later",
                 "702": "User conflict -- another session is active",
             }
-            msg = error_map.get(
-                str(error), f"Login failed (error {error})"
-            )
+            msg = error_map.get(str(error), f"Login failed (error {error})")
             raise RuntimeError(msg)
 
         self.stok = data.get("result", {}).get("stok", data.get("stok", ""))
         if not self.stok:
-            raise RuntimeError(
-                "Login succeeded but no session token returned"
-            )
+            raise RuntimeError("Login succeeded but no session token returned")
 
     def logout(self):
         if self.stok:
             try:
-                self._post(
-                    "/admin/system?form=logout", {"method": "set"}
-                )
+                self._post("/admin/system?form=logout", {"method": "set"})
             except (requests.RequestException, RuntimeError):
                 pass
             self.stok = ""
@@ -239,18 +233,14 @@ class OmadaRouter:
         self._post_diag({"method": "start", "params": params})
         for _ in range(count + 10):
             time.sleep(1)
-            data = self._post_diag(
-                {"method": "continue", "params": params}
-            )
+            data = self._post_diag({"method": "continue", "params": params})
             result = data.get("result", {})
             if str(result.get("finish")) == "1":
                 return result.get("my_result", "")
         return None
 
     def get_interface_status(self):
-        return self._post(
-            "/admin/interface?form=status3", {"method": "get"}
-        )
+        return self._post("/admin/interface?form=status3", {"method": "get"})
 
     def get_wan_interfaces(self):
         data = self.get_interface_status()
@@ -320,15 +310,12 @@ class OmadaRouter:
         )
         if str(data.get("error_code", -1)) != "0":
             raise RuntimeError(
-                f"Failed to set WAN bandwidth "
-                f"(error {data.get('error_code')})"
+                f"Failed to set WAN bandwidth (error {data.get('error_code')})"
             )
         return data
 
     def get_interface_stats(self):
-        data = self._post(
-            "/admin/ifstat?form=list", {"method": "get"}
-        )
+        data = self._post("/admin/ifstat?form=list", {"method": "get"})
         if str(data.get("error_code", -1)) != "0":
             raise RuntimeError(
                 f"Failed to get interface stats "
@@ -337,20 +324,15 @@ class OmadaRouter:
         return {s["zone"]: s for s in data.get("result", [])}
 
     def get_dhcp_clients(self):
-        data = self._post(
-            "/admin/dhcps?form=client", {"method": "get"}
-        )
+        data = self._post("/admin/dhcps?form=client", {"method": "get"})
         if str(data.get("error_code", -1)) != "0":
             raise RuntimeError(
-                f"Failed to get DHCP clients "
-                f"(error {data.get('error_code')})"
+                f"Failed to get DHCP clients (error {data.get('error_code')})"
             )
         return data.get("result", [])
 
     def get_dhcp_reservations(self):
-        data = self._post(
-            "/admin/dhcps?form=reservation", {"method": "get"}
-        )
+        data = self._post("/admin/dhcps?form=reservation", {"method": "get"})
         if str(data.get("error_code", -1)) != "0":
             raise RuntimeError(
                 f"Failed to get DHCP reservations "
@@ -359,15 +341,18 @@ class OmadaRouter:
         return data.get("result", [])
 
     def add_dhcp_reservation(self, record):
-        data = self._post("/admin/dhcps?form=reservation", {
-            "method": "add",
-            "params": {
-                "index": 0,
-                "old": "add",
-                "new": record,
-                "ip": "add",
+        data = self._post(
+            "/admin/dhcps?form=reservation",
+            {
+                "method": "add",
+                "params": {
+                    "index": 0,
+                    "old": "add",
+                    "new": record,
+                    "ip": "add",
+                },
             },
-        })
+        )
         if str(data.get("error_code", -1)) != "0":
             raise RuntimeError(
                 f"Failed to add DHCP reservation "
@@ -378,18 +363,19 @@ class OmadaRouter:
     def update_dhcp_reservation(
         self, index, old_record, new_record, original_ip
     ):
-        old_without_ip = {
-            k: v for k, v in old_record.items() if k != "ip"
-        }
-        data = self._post("/admin/dhcps?form=reservation", {
-            "method": "set",
-            "params": {
-                "index": index,
-                "old": old_without_ip,
-                "new": new_record,
-                "ip": original_ip,
+        old_without_ip = {k: v for k, v in old_record.items() if k != "ip"}
+        data = self._post(
+            "/admin/dhcps?form=reservation",
+            {
+                "method": "set",
+                "params": {
+                    "index": index,
+                    "old": old_without_ip,
+                    "new": new_record,
+                    "ip": original_ip,
+                },
             },
-        })
+        )
         if str(data.get("error_code", -1)) != "0":
             raise RuntimeError(
                 f"Failed to update DHCP reservation "
@@ -398,14 +384,17 @@ class OmadaRouter:
         return data
 
     def delete_dhcp_reservation(self, ip, index, interface):
-        data = self._post("/admin/dhcps?form=reservation", {
-            "method": "delete",
-            "params": {
-                "key": ip,
-                "index": str(index),
-                "extraKey": interface,
+        data = self._post(
+            "/admin/dhcps?form=reservation",
+            {
+                "method": "delete",
+                "params": {
+                    "key": ip,
+                    "index": str(index),
+                    "extraKey": interface,
+                },
             },
-        })
+        )
         if str(data.get("error_code", -1)) != "0":
             raise RuntimeError(
                 f"Failed to delete DHCP reservation "
@@ -468,7 +457,11 @@ def _print_single_wan(wan, bandwidth=None):
             print(f"  {'Downstream':<20s} {_format_kbps(down)}")
 
     known = {f[1] for f in fields} | {
-        "t_name", "t_label", "t_type", "second_conn", "error_code",
+        "t_name",
+        "t_label",
+        "t_type",
+        "second_conn",
+        "error_code",
     }
     for key, value in wan.items():
         if key not in known:
@@ -477,8 +470,7 @@ def _print_single_wan(wan, bandwidth=None):
 
 def cmd_wan(router, args):
     wan_list = [
-        w for w in router.get_wan_interfaces()
-        if w.get("t_proto") != "none"
+        w for w in router.get_wan_interfaces() if w.get("t_proto") != "none"
     ]
     if not wan_list:
         print("No WAN interfaces found.")
@@ -544,14 +536,10 @@ def cmd_wan_config(router, args):
         sys.exit(1)
 
     wan_list = router.get_wan_interfaces()
-    mode = router._post(
-        "/admin/interface_wan?form=wanmode", {"method": "get"}
-    )
+    mode = router._post("/admin/interface_wan?form=wanmode", {"method": "get"})
     mode_result = mode.get("result", {})
 
-    wan_id, name, label = _resolve_wan(
-        wan_list, mode_result, args.wan_name
-    )
+    wan_id, name, label = _resolve_wan(wan_list, mode_result, args.wan_name)
     if wan_id is None:
         print(
             f"Error: WAN interface '{args.wan_name}' not found",
@@ -562,13 +550,19 @@ def cmd_wan_config(router, args):
     uplink_kbps = _parse_bandwidth(upstream) if upstream else None
     downlink_kbps = _parse_bandwidth(downstream) if downstream else None
 
-    router.set_wan_bandwidth(wan_id, uplink=uplink_kbps, downlink=downlink_kbps)
+    router.set_wan_bandwidth(
+        wan_id, uplink=uplink_kbps, downlink=downlink_kbps
+    )
 
     header = f"{name} ({label})" if label else name
     bandwidth = router.get_wan_bandwidth()
     bw = bandwidth.get(label, {})
     if args.output_json:
-        print(json.dumps({"interface": name, "label": label, "bandwidth": bw}, indent=2))
+        print(
+            json.dumps(
+                {"interface": name, "label": label, "bandwidth": bw}, indent=2
+            )
+        )
         return
     print(f"{header}: bandwidth updated")
     if bw.get("uplink"):
@@ -587,8 +581,7 @@ def _format_bytes(n):
 
 def cmd_wan_stats(router, args):
     wan_list = [
-        w for w in router.get_wan_interfaces()
-        if w.get("t_proto") != "none"
+        w for w in router.get_wan_interfaces() if w.get("t_proto") != "none"
     ]
     if not wan_list:
         print("No WAN interfaces found.")
@@ -629,8 +622,12 @@ def cmd_wan_stats(router, args):
         print(f"  {'TX Rate':<20s} {s.get('tx_bps', 0)} KB/s")
         print(f"  {'RX Packets/s':<20s} {s.get('rx_pps', 0)}")
         print(f"  {'TX Packets/s':<20s} {s.get('tx_pps', 0)}")
-        print(f"  {'Total RX':<20s} {_format_bytes(int(s.get('rx_bytes', 0)))}")
-        print(f"  {'Total TX':<20s} {_format_bytes(int(s.get('tx_bytes', 0)))}")
+        print(
+            f"  {'Total RX':<20s} {_format_bytes(int(s.get('rx_bytes', 0)))}"
+        )
+        print(
+            f"  {'Total TX':<20s} {_format_bytes(int(s.get('tx_bytes', 0)))}"
+        )
         print(f"  {'Total RX Packets':<20s} {s.get('rx_pkts', 0)}")
         print(f"  {'Total TX Packets':<20s} {s.get('tx_pkts', 0)}")
 
@@ -641,9 +638,7 @@ DEFAULT_PING_TARGETS = ["8.8.8.8", "1.1.1.1"]
 def cmd_wan_test(router, args):
     targets = [args.target] if args.target else DEFAULT_PING_TARGETS
     wan_list = router.get_wan_interfaces()
-    primary_wans = [
-        w for w in wan_list if not w.get("second_conn", False)
-    ]
+    primary_wans = [w for w in wan_list if not w.get("second_conn", False)]
     if not primary_wans:
         print("No WAN interfaces found.")
         return
@@ -665,13 +660,15 @@ def cmd_wan_test(router, args):
                 break
             print(" FAIL")
 
-        results.append({
-            "interface": name,
-            "label": label,
-            "target": target,
-            "passed": passed,
-            "output": output or "",
-        })
+        results.append(
+            {
+                "interface": name,
+                "label": label,
+                "target": target,
+                "passed": passed,
+                "output": output or "",
+            }
+        )
 
     if args.output_json:
         print(json.dumps(results, indent=2))
@@ -694,8 +691,7 @@ def cmd_dhcp_assigned(router, args):
     if args.lan:
         lan_filter = args.lan.lower()
         clients = [
-            c for c in clients
-            if c.get("interface", "").lower() == lan_filter
+            c for c in clients if c.get("interface", "").lower() == lan_filter
         ]
 
     if args.output_json:
@@ -732,7 +728,8 @@ def cmd_dhcp_reserved(router, args):
     if args.lan:
         lan_filter = args.lan.lower()
         reservations = [
-            r for r in reservations
+            r
+            for r in reservations
             if r.get("interface", "").lower() == lan_filter
         ]
 
@@ -757,9 +754,7 @@ def cmd_dhcp_reserved(router, args):
         mac = r.get("mac", "")
         enabled = "Enabled" if r.get("enable") == "on" else "Disabled"
         iface = r.get("interface", "")
-        print(
-            f"  {note:<36s} {ip:<18s} {mac:<20s} {enabled:<10s} {iface}"
-        )
+        print(f"  {note:<36s} {ip:<18s} {mac:<20s} {enabled:<10s} {iface}")
 
 
 # -- dhcp reserve command --------------------------------------------
@@ -852,9 +847,7 @@ def cmd_dhcp_unreserve(router, args):
     reservations = router.get_dhcp_reservations()
     for i, r in enumerate(reservations):
         if r.get("ip") == ip:
-            router.delete_dhcp_reservation(
-                ip, i, r.get("interface", "LAN")
-            )
+            router.delete_dhcp_reservation(ip, i, r.get("interface", "LAN"))
             print(f"Deleted reservation for {ip}")
             return
 
@@ -950,11 +943,10 @@ def cmd_certificate_clear(router, args):
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(
-        description="Omada ER605 router CLI"
-    )
+    parser = argparse.ArgumentParser(description="Omada ER605 router CLI")
     parser.add_argument(
-        "--config", "-c",
+        "--config",
+        "-c",
         default=None,
         help="Path to configuration file",
     )
@@ -977,9 +969,7 @@ def build_parser():
     subparsers = parser.add_subparsers(dest="command")
 
     # wan
-    wan_parser = subparsers.add_parser(
-        "wan", help="WAN operations"
-    )
+    wan_parser = subparsers.add_parser("wan", help="WAN operations")
     wan_parser.set_defaults(func=cmd_wan)
     wan_sub = wan_parser.add_subparsers(dest="wan_command")
 
@@ -994,7 +984,8 @@ def build_parser():
         "test", help="Test WAN connectivity by pinging a remote host"
     )
     wan_test_parser.add_argument(
-        "--target", "-t",
+        "--target",
+        "-t",
         default=None,
         help="IP or hostname to ping (default: 8.8.8.8, fallback 1.1.1.1)",
     )
@@ -1027,9 +1018,7 @@ def build_parser():
     wan_config_parser.set_defaults(func=cmd_wan_config)
 
     # dhcp
-    dhcp_parser = subparsers.add_parser(
-        "dhcp", help="DHCP operations"
-    )
+    dhcp_parser = subparsers.add_parser("dhcp", help="DHCP operations")
     dhcp_sub = dhcp_parser.add_subparsers(dest="dhcp_command")
 
     # dhcp assigned
@@ -1103,9 +1092,7 @@ def build_parser():
     password_parser = subparsers.add_parser(
         "password", help="Manage stored router password"
     )
-    password_sub = password_parser.add_subparsers(
-        dest="password_command"
-    )
+    password_sub = password_parser.add_subparsers(dest="password_command")
 
     # password set
     pw_set_parser = password_sub.add_parser(
@@ -1118,9 +1105,7 @@ def build_parser():
         "clear",
         help="Remove the router password from the system keyring",
     )
-    pw_clear_parser.set_defaults(
-        func=cmd_password_clear, needs_login=False
-    )
+    pw_clear_parser.set_defaults(func=cmd_password_clear, needs_login=False)
 
     # certificate
     cert_parser = subparsers.add_parser(
@@ -1177,9 +1162,7 @@ def main():
     if not password:
         password = keyring.get_password(KEYRING_SERVICE, args.user)
     if not password:
-        password = getpass.getpass(
-            f"Password for {args.user}@{args.host}: "
-        )
+        password = getpass.getpass(f"Password for {args.user}@{args.host}: ")
 
     router = OmadaRouter(args.host)
     try:
@@ -1190,9 +1173,7 @@ def main():
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
     except requests.exceptions.ConnectionError:
-        print(
-            f"Error: Cannot connect to {args.host}", file=sys.stderr
-        )
+        print(f"Error: Cannot connect to {args.host}", file=sys.stderr)
         sys.exit(1)
     finally:
         router.logout()
