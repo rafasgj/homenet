@@ -259,6 +259,17 @@ class OmadaRouter:
             }
         return result
 
+    def get_interface_stats(self):
+        data = self._post(
+            "/admin/ifstat?form=list", {"method": "get"}
+        )
+        if str(data.get("error_code", -1)) != "0":
+            raise RuntimeError(
+                f"Failed to get interface stats "
+                f"(error {data.get('error_code')})"
+            )
+        return {s["zone"]: s for s in data.get("result", [])}
+
     def get_dhcp_clients(self):
         data = self._post(
             "/admin/dhcps?form=client", {"method": "get"}
@@ -416,6 +427,64 @@ def cmd_wan(router, args):
         return
     for wan in wan_list:
         _print_single_wan(wan, bandwidth.get(wan.get("t_label")))
+
+
+def _format_bytes(n):
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if abs(n) < 1024:
+            return f"{n:.1f} {unit}" if unit != "B" else f"{n} {unit}"
+        n /= 1024
+    return f"{n:.1f} PB"
+
+
+def cmd_wan_stats(router, args):
+    wan_list = [
+        w for w in router.get_wan_interfaces()
+        if w.get("t_proto") != "none"
+    ]
+    if not wan_list:
+        print("No WAN interfaces found.")
+        return
+
+    stats = router.get_interface_stats()
+    bandwidth = router.get_wan_bandwidth()
+
+    if args.output_json:
+        result = []
+        for w in wan_list:
+            name = w.get("t_name", "?")
+            s = dict(stats.get(name, {}))
+            s["interface"] = name
+            s["label"] = w.get("t_label", "")
+            bw = bandwidth.get(w.get("t_label"), {})
+            if bw:
+                s["bandwidth"] = bw
+            result.append(s)
+        print(json.dumps(result, indent=2))
+        return
+
+    for w in wan_list:
+        name = w.get("t_name", "?")
+        label = w.get("t_label", "")
+        header = f"{name} ({label})" if label else name
+        s = stats.get(name, {})
+        bw = bandwidth.get(label, {})
+
+        print(f"\n{'=' * 50}")
+        print(f"  {header}")
+        print(f"{'=' * 50}")
+        if bw.get("downlink"):
+            print(f"  {'Downstream':<20s} {_format_kbps(bw['downlink'])}")
+        if bw.get("uplink"):
+            print(f"  {'Upstream':<20s} {_format_kbps(bw['uplink'])}")
+        print(f"  {'RX Rate':<20s} {s.get('rx_bps', 0)} KB/s")
+        print(f"  {'TX Rate':<20s} {s.get('tx_bps', 0)} KB/s")
+        print(f"  {'RX Packets/s':<20s} {s.get('rx_pps', 0)}")
+        print(f"  {'TX Packets/s':<20s} {s.get('tx_pps', 0)}")
+        print(f"  {'Total RX':<20s} {_format_bytes(int(s.get('rx_bytes', 0)))}")
+        print(f"  {'Total TX':<20s} {_format_bytes(int(s.get('tx_bytes', 0)))}")
+        print(f"  {'Total RX Packets':<20s} {s.get('rx_pkts', 0)}")
+        print(f"  {'Total TX Packets':<20s} {s.get('tx_pkts', 0)}")
 
 
 DEFAULT_PING_TARGETS = ["8.8.8.8", "1.1.1.1"]
@@ -699,6 +768,12 @@ def build_parser():
         help="IP or hostname to ping (default: 8.8.8.8, fallback 1.1.1.1)",
     )
     wan_test_parser.set_defaults(func=cmd_wan_test)
+
+    # wan stats
+    wan_stats_parser = wan_sub.add_parser(
+        "stats", help="Show live traffic statistics for WAN interfaces"
+    )
+    wan_stats_parser.set_defaults(func=cmd_wan_stats)
 
     # dhcp
     dhcp_parser = subparsers.add_parser(
