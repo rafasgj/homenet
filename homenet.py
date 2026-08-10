@@ -229,6 +229,36 @@ class OmadaRouter:
             if iface.get("t_name", "").startswith("WAN")
         ]
 
+    def get_wan_bandwidth(self):
+        """Fetch configured bandwidth for each WAN port.
+
+        Returns a dict mapping WAN name to {uplink, downlink} in Kbps.
+        """
+        mode = self._post(
+            "/admin/interface_wan?form=wanmode", {"method": "get"}
+        )
+        mode_result = mode.get("result", {})
+        wan_numbers = mode_result.get("wan_numbers", [])
+        wan_names = mode_result.get("wan_names", [])
+
+        num_to_label = {}
+        for entry in wan_names:
+            num_to_label[entry.get("index")] = entry.get("name", "")
+
+        result = {}
+        for num in wan_numbers:
+            cfg = self._post(
+                "/admin/interface_wan?form=wanconfig",
+                {"method": "get", "params": {"wan_id": num}},
+            )
+            cfg_result = cfg.get("result", {})
+            label = num_to_label.get(num, f"WAN{num}")
+            result[label] = {
+                "uplink": cfg_result.get("uplink", 0),
+                "downlink": cfg_result.get("downlink", 0),
+            }
+        return result
+
     def get_dhcp_clients(self):
         data = self._post(
             "/admin/dhcps?form=client", {"method": "get"}
@@ -310,7 +340,14 @@ class OmadaRouter:
 # -- wan command -----------------------------------------------------
 
 
-def _print_single_wan(wan):
+def _format_kbps(kbps):
+    kbps = int(kbps)
+    if kbps >= 1000:
+        return f"{kbps / 1000:.0f} Mbps"
+    return f"{kbps} Kbps"
+
+
+def _print_single_wan(wan, bandwidth=None):
     name = wan.get("t_name", "?")
     label = wan.get("t_label", "")
     secondary = wan.get("second_conn", False)
@@ -345,6 +382,14 @@ def _print_single_wan(wan):
             value = "Up" if value else "Down"
         print(f"  {display_name:<20s} {value}")
 
+    if bandwidth:
+        up = bandwidth.get("uplink", 0)
+        down = bandwidth.get("downlink", 0)
+        if up:
+            print(f"  {'Upstream':<20s} {_format_kbps(up)}")
+        if down:
+            print(f"  {'Downstream':<20s} {_format_kbps(down)}")
+
     known = {f[1] for f in fields} | {
         "t_name", "t_label", "t_type", "second_conn", "error_code",
     }
@@ -358,14 +403,19 @@ def cmd_wan(router, args):
         w for w in router.get_wan_interfaces()
         if w.get("t_proto") != "none"
     ]
-    if args.output_json:
-        print(json.dumps(wan_list, indent=2))
-        return
     if not wan_list:
         print("No WAN interfaces found.")
         return
+    bandwidth = router.get_wan_bandwidth()
+    if args.output_json:
+        for w in wan_list:
+            bw = bandwidth.get(w.get("t_label"), {})
+            if bw:
+                w["bandwidth"] = bw
+        print(json.dumps(wan_list, indent=2))
+        return
     for wan in wan_list:
-        _print_single_wan(wan)
+        _print_single_wan(wan, bandwidth.get(wan.get("t_label")))
 
 
 DEFAULT_PING_TARGETS = ["8.8.8.8", "1.1.1.1"]
