@@ -275,10 +275,13 @@ class OmadaRouter:
 
         result = {}
         for num in wan_numbers:
-            cfg = self._post(
-                "/admin/interface_wan?form=wanconfig",
-                {"method": "get", "params": {"wan_id": num}},
-            )
+            try:
+                cfg = self._post(
+                    "/admin/interface_wan?form=wanconfig",
+                    {"method": "get", "params": {"wan_id": num}},
+                )
+            except requests.exceptions.HTTPError:
+                continue
             cfg_result = cfg.get("result", {})
             label = num_to_label.get(num, f"WAN{num}")
             result[label] = {
@@ -311,6 +314,32 @@ class OmadaRouter:
         if str(data.get("error_code", -1)) != "0":
             raise RuntimeError(
                 f"Failed to set WAN bandwidth (error {data.get('error_code')})"
+            )
+        return data
+
+    def get_wan_mode(self):
+        return self._post(
+            "/admin/interface_wan?form=wanmode", {"method": "get"}
+        ).get("result", {})
+
+    def set_wan_mode(self, wan_numbers):
+        """Set active WAN ports by updating wan_numbers.
+
+        The router reconfigures on this call and may time out.
+        """
+        mode_result = self.get_wan_mode()
+        params = dict(mode_result)
+        params["wan_numbers"] = [str(n) for n in wan_numbers]
+        try:
+            data = self._post(
+                "/admin/interface_wan?form=wanmode",
+                {"method": "set", "params": params},
+            )
+        except requests.exceptions.ReadTimeout:
+            return None
+        if str(data.get("error_code", -1)) != "0":
+            raise RuntimeError(
+                f"Failed to set WAN mode (error {data.get('error_code')})"
             )
         return data
 
@@ -422,13 +451,14 @@ def _format_kbps(kbps):
 
 
 def _print_single_wan(wan, bandwidth=None):
-    name = wan.get("t_name", "?")
+    name = wan.get("t_name", "")
     label = wan.get("t_label", "")
     secondary = wan.get("second_conn", False)
 
-    header = name
-    if label:
-        header += f" ({label})"
+    if name and label:
+        header = f"{name} ({label})"
+    else:
+        header = name or label or "?"
     if secondary:
         header += " [secondary]"
 
@@ -477,21 +507,48 @@ def _print_single_wan(wan, bandwidth=None):
 
 
 def cmd_wan(router, args):
-    wan_list = [
-        w for w in router.get_wan_interfaces() if w.get("t_proto") != "none"
-    ]
-    if not wan_list:
+    wan_list = router.get_wan_interfaces()
+    mode_result = router.get_wan_mode()
+    wan_numbers = mode_result.get("wan_numbers", [])
+    wan_names = {
+        entry.get("index"): entry.get("name", "")
+        for entry in mode_result.get("wan_names", [])
+    }
+
+    seen_labels = set()
+    primary_wans = []
+    for w in wan_list:
+        if w.get("second_conn", False):
+            continue
+        label = w.get("t_label", "")
+        seen_labels.add(label)
+        primary_wans.append(w)
+
+    for num in wan_numbers:
+        label = wan_names.get(str(num), "")
+        if label and label not in seen_labels:
+            primary_wans.append(
+                {
+                    "t_name": "",
+                    "t_label": label,
+                    "t_proto": "none",
+                    "t_isup": False,
+                }
+            )
+
+    if not primary_wans:
         print("No WAN interfaces found.")
         return
+
     bandwidth = router.get_wan_bandwidth()
     if args.output_json:
-        for w in wan_list:
+        for w in primary_wans:
             bw = bandwidth.get(w.get("t_label"), {})
             if bw:
                 w["bandwidth"] = bw
-        print(json.dumps(wan_list, indent=2))
+        print(json.dumps(primary_wans, indent=2))
         return
-    for wan in wan_list:
+    for wan in primary_wans:
         _print_single_wan(wan, bandwidth.get(wan.get("t_label")))
 
 
@@ -533,50 +590,101 @@ def _resolve_wan(wan_list, mode_result, identifier):
     return None, None, None
 
 
+def _resolve_wan_name_to_id(mode_result, name):
+    """Resolve a WAN label to its index from the mode result."""
+    for entry in mode_result.get("wan_names", []):
+        if entry.get("name", "").upper() == name.upper():
+            return entry.get("index")
+    return None
+
+
 def cmd_wan_config(router, args):
     downstream = args.downstream
     upstream = args.upstream
-    if downstream is None and upstream is None:
+    enable_list = args.enable or []
+    disable_list = args.disable or []
+    has_bandwidth = downstream is not None or upstream is not None
+    has_mode = bool(enable_list or disable_list)
+
+    if not has_bandwidth and not has_mode:
         print(
-            "Error: at least one of --downstream or --upstream is required",
+            "Error: at least one of --downstream, --upstream, "
+            "--enable, or --disable is required",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    wan_list = router.get_wan_interfaces()
-    mode = router._post("/admin/interface_wan?form=wanmode", {"method": "get"})
-    mode_result = mode.get("result", {})
-
-    wan_id, name, label = _resolve_wan(wan_list, mode_result, args.wan_name)
-    if wan_id is None:
+    if has_bandwidth and not args.wan_name:
         print(
-            f"Error: WAN interface '{args.wan_name}' not found",
+            "Error: WAN_NAME is required when setting bandwidth",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    uplink_kbps = _parse_bandwidth(upstream) if upstream else None
-    downlink_kbps = _parse_bandwidth(downstream) if downstream else None
+    mode_result = router.get_wan_mode()
 
-    router.set_wan_bandwidth(
-        wan_id, uplink=uplink_kbps, downlink=downlink_kbps
-    )
+    if has_mode:
+        wan_numbers = list(mode_result.get("wan_numbers", []))
+        for name in enable_list:
+            wid = _resolve_wan_name_to_id(mode_result, name)
+            if wid is None:
+                print(
+                    f"Error: WAN interface '{name}' not found",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            if str(wid) not in [str(n) for n in wan_numbers]:
+                wan_numbers.append(str(wid))
+                print(f"Enabling {name}")
+        for name in disable_list:
+            wid = _resolve_wan_name_to_id(mode_result, name)
+            if wid is None:
+                print(
+                    f"Error: WAN interface '{name}' not found",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            wan_numbers = [str(n) for n in wan_numbers if str(n) != str(wid)]
+            print(f"Disabling {name}")
+        router.set_wan_mode(wan_numbers)
 
-    header = f"{name} ({label})" if label else name
-    bandwidth = router.get_wan_bandwidth()
-    bw = bandwidth.get(label, {})
-    if args.output_json:
-        print(
-            json.dumps(
-                {"interface": name, "label": label, "bandwidth": bw}, indent=2
+    if has_bandwidth:
+        wan_list = router.get_wan_interfaces()
+        if has_mode:
+            mode_result = router.get_wan_mode()
+        wan_id, name, label = _resolve_wan(
+            wan_list, mode_result, args.wan_name
+        )
+        if wan_id is None:
+            print(
+                f"Error: WAN interface '{args.wan_name}' not found",
+                file=sys.stderr,
             )
+            sys.exit(1)
+
+        uplink_kbps = _parse_bandwidth(upstream) if upstream else None
+        downlink_kbps = _parse_bandwidth(downstream) if downstream else None
+
+        router.set_wan_bandwidth(
+            wan_id, uplink=uplink_kbps, downlink=downlink_kbps
         )
-        return
-    print(f"{header}: bandwidth updated")
-    if bw.get("uplink"):
-        print(f"  {'Upstream':<20s} {_format_kbps(bw['uplink'])}")
-    if bw.get("downlink"):
-        print(f"  {'Downstream':<20s} {_format_kbps(bw['downlink'])}")
+
+        header = f"{name} ({label})" if label else name
+        bandwidth = router.get_wan_bandwidth()
+        bw = bandwidth.get(label, {})
+        if args.output_json:
+            print(
+                json.dumps(
+                    {"interface": name, "label": label, "bandwidth": bw},
+                    indent=2,
+                )
+            )
+            return
+        print(f"{header}: bandwidth updated")
+        if bw.get("uplink"):
+            print(f"  {'Upstream':<20s} {_format_kbps(bw['uplink'])}")
+        if bw.get("downlink"):
+            print(f"  {'Downstream':<20s} {_format_kbps(bw['downlink'])}")
 
 
 def _format_bytes(n):
@@ -1018,10 +1126,12 @@ def build_parser():
 
     # wan config
     wan_config_parser = wan_sub.add_parser(
-        "config", help="Configure WAN bandwidth settings"
+        "config", help="Configure WAN interface settings"
     )
     wan_config_parser.add_argument(
         "wan_name",
+        nargs="?",
+        default=None,
         help="WAN interface name (e.g. WAN, WAN/LAN1, WAN1)",
     )
     wan_config_parser.add_argument(
@@ -1033,6 +1143,20 @@ def build_parser():
         "--upstream",
         default=None,
         help="Upstream bandwidth in Kbps (suffix 'm' for Mbps, e.g. 50m)",
+    )
+    wan_config_parser.add_argument(
+        "--enable",
+        action="append",
+        default=None,
+        metavar="WAN_NAME",
+        help="Enable a WAN interface (e.g. WAN/LAN2)",
+    )
+    wan_config_parser.add_argument(
+        "--disable",
+        action="append",
+        default=None,
+        metavar="WAN_NAME",
+        help="Disable a WAN interface (e.g. WAN/LAN2)",
     )
     wan_config_parser.set_defaults(func=cmd_wan_config)
 

@@ -112,10 +112,13 @@ Tests connectivity on each WAN port by pinging a remote host through the router.
 ### wan config
 
 ```
-homenet wan config WAN_NAME [--downstream VALUE] [--upstream VALUE]
+homenet wan config [WAN_NAME] [--downstream VALUE] [--upstream VALUE] [--enable WAN_NAME] [--disable WAN_NAME]
 ```
 
-Sets the downstream and/or upstream bandwidth for a WAN interface. The interface can be specified by its label (e.g. `WAN`, `WAN/LAN1`) or name (e.g. `WAN1`, `WAN2`). At least one of `--downstream` or `--upstream` must be provided; the other is preserved. Values are in Kbps by default; append `m` for Mbps (e.g. `100m`).
+Configures WAN interface settings. At least one option is required.
+
+- `--downstream` / `--upstream` set bandwidth for the interface given by `WAN_NAME` (required when setting bandwidth). The interface can be specified by its label (e.g. `WAN`, `WAN/LAN1`) or name (e.g. `WAN1`, `WAN2`). Values are in Kbps by default; append `m` for Mbps (e.g. `100m`). Only the provided value is changed; the other is preserved.
+- `--enable` / `--disable` activate or deactivate a WAN interface (e.g. `WAN/LAN2`). Can be specified multiple times to enable or disable several interfaces at once.
 
 **Note:** Changing the WAN interface configuration will reset all WAN statistics.
 
