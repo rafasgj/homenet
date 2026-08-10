@@ -195,6 +195,14 @@ homenet certificate clear
 
 Removes the locally stored TLS certificate for the router.
 
+### firmware check
+
+```
+homenet firmware check
+```
+
+Checks the current router firmware version and compares it with the latest version available from the [TP-Link support page](https://support.omadanetworks.com/en/download/firmware/er605/v2.20). If an update is available, prints the new version and a download link.
+
 ## License
 
 This project is licensed under the GNU General Public License v3.0 or later. See the [COPYING](COPYING) file for the full license text.

@@ -360,6 +360,14 @@ class OmadaRouter:
                 f"(error {data.get('error_code')})"
             )
 
+    def get_firmware_info(self):
+        data = self._post("/admin/firmware?form=upgrade", {"method": "get"})
+        if str(data.get("error_code", -1)) != "0":
+            raise RuntimeError(
+                f"Failed to get firmware info (error {data.get('error_code')})"
+            )
+        return data.get("result", {})
+
     def get_dhcp_clients(self):
         data = self._post("/admin/dhcps?form=client", {"method": "get"})
         if str(data.get("error_code", -1)) != "0":
@@ -1060,6 +1068,77 @@ def cmd_certificate_clear(router, args):
         sys.exit(1)
 
 
+# -- firmware commands ------------------------------------------------
+
+FIRMWARE_SUPPORT_URL = (
+    "https://support.omadanetworks.com/en/download/firmware/er605/v2.20"
+)
+
+
+def _parse_firmware_version(version_string):
+    """Extract the version tuple from a firmware version string.
+
+    Handles formats like "2.4.5 Build 20260721 Rel.81048".
+    """
+    match = re.match(r"(\d+(?:\.\d+)+)", version_string.strip())
+    if match:
+        return tuple(int(p) for p in match.group(1).split("."))
+    return ()
+
+
+def _fetch_latest_firmware_version():
+    """Fetch the latest firmware version from the support page."""
+    resp = requests.get(FIRMWARE_SUPPORT_URL, timeout=15)
+    resp.raise_for_status()
+    pattern = re.compile(r"ER605\(UN\)_V2\.20_([\d.]+)\s+Build\s+(\d+)")
+    best_version = ()
+    best_text = ""
+    for match in pattern.finditer(resp.text):
+        ver = tuple(int(p) for p in match.group(1).split("."))
+        if ver > best_version:
+            best_version = ver
+            best_text = match.group(1)
+    return best_text, best_version
+
+
+def cmd_firmware_check(router, args):
+    info = router.get_firmware_info()
+    current_str = info.get("firmware_version", "")
+    hardware = info.get("hardware_version", "")
+    current_ver = _parse_firmware_version(current_str)
+
+    try:
+        latest_str, latest_ver = _fetch_latest_firmware_version()
+    except (requests.RequestException, ValueError) as exc:
+        print(
+            f"Warning: Could not check for updates: {exc}",
+            file=sys.stderr,
+        )
+        latest_str, latest_ver = "", ()
+
+    if args.output_json:
+        result = {
+            "hardware_version": hardware,
+            "firmware_version": current_str,
+            "latest_version": latest_str or None,
+            "update_available": (
+                latest_ver > current_ver if latest_ver else None
+            ),
+            "support_url": FIRMWARE_SUPPORT_URL,
+        }
+        print(json.dumps(result, indent=2))
+        return
+
+    print(f"  Model:    {hardware}")
+    print(f"  Firmware: {current_str}")
+
+    if latest_ver > current_ver:
+        print(f"\n  Update available: {latest_str}")
+        print(f"  Download: {FIRMWARE_SUPPORT_URL}")
+    else:
+        print("\n  Firmware is up to date.")
+
+
 # -- CLI -------------------------------------------------------------
 
 
@@ -1273,6 +1352,18 @@ def build_parser():
     cert_clear_parser.set_defaults(
         func=cmd_certificate_clear, needs_login=False
     )
+
+    # firmware
+    firmware_parser = subparsers.add_parser(
+        "firmware", help="Firmware operations"
+    )
+    firmware_sub = firmware_parser.add_subparsers(dest="firmware_command")
+
+    # firmware check
+    fw_check_parser = firmware_sub.add_parser(
+        "check", help="Check current firmware and available updates"
+    )
+    fw_check_parser.set_defaults(func=cmd_firmware_check)
 
     return parser
 
