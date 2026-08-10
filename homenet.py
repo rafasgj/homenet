@@ -44,7 +44,6 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 REFERER_PATH = "/webpages/login.html"
 CONFIG_SEARCH_PATHS = [
     os.path.expanduser("~/.config/homenet/config"),
-    "./.homenet",
 ]
 
 

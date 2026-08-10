@@ -32,7 +32,6 @@ The router address is read from a configuration file. The following paths are se
 
 1. Path given by `--config` / `-c`
 2. `~/.config/homenet/config`
-3. `./.homenet`
 
 The file uses INI format with a `GATEWAY` variable:
 
